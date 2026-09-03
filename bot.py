@@ -1,9 +1,22 @@
 import os
 import io
+import threading
 import pandas as pd
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
+
+# Configuración de Flask para que Render detecte un puerto abierto y mantenga el servicio gratis
+app_flask = Flask(__name__)
+
+@app_flask.route('/')
+def home():
+    return "¡El bot de trazabilidad está activo y funcionando!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app_flask.run(host="0.0.0.0", port=port)
 
 # Leemos el token de forma segura desde las variables de entorno de la nube o del sistema
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -345,6 +358,10 @@ def main():
         print("❌ Error: No se encontró la variable de entorno TELEGRAM_TOKEN.")
         return
         
+    # Arrancamos Flask en un hilo separado (background) para satisfacer el requisito de puertos de Render
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+
     request_config = HTTPXRequest(read_timeout=30.0, connect_timeout=30.0)
     app = Application.builder().token(TOKEN).request(request_config).build()
     
@@ -352,7 +369,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_saludos_o_busqueda))
     app.add_handler(CallbackQueryHandler(manejar_botones))
     
-    print("🤖 Bot listo... Presioná Ctrl+C para detenerlo.")
+    print("🤖 Bot listo y servidor web falso corriendo... Presioná Ctrl+C para detenerlo.")
     app.run_polling()
 
 if __name__ == '__main__':
