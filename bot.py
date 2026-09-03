@@ -5,7 +5,8 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
-TOKEN = "8309442536:AAE9UfLhhuLBvWHZGy7coYpZyIYRLommtUM"
+# Leemos el token de forma segura desde las variables de entorno de la nube o del sistema
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
 EXCEL_PATH = "datos_pedidos.xlsx"
 NOMBRE_HOJA = "Pedidos_Pistachos (2)"
 
@@ -48,7 +49,6 @@ async def manejar_saludos_o_busqueda(update: Update, context: ContextTypes.DEFAU
     
     saludos = ["hola", "buen dia", "buenas", "buenas tardes", "buenos dias", "hey", "hi", "saludos", "que tal"]
     
-    # Si manda saludos o signos de pregunta / ayuda
     if texto in saludos or texto in ["?", "ayuda", "help", "estoy perdido", "como es esto"]:
         if user_id in user_sessions:
             try:
@@ -76,7 +76,6 @@ async def manejar_saludos_o_busqueda(update: Update, context: ContextTypes.DEFAU
         await update.message.reply_text("Listorti, cancelamos lo anterior. ¿Qué andás buscando ahora?")
         return
 
-    # Si hay sesión abierta y manda cualquier otra cosa que no sea cancelar
     if user_id in user_sessions:
         try:
             await update.message.delete()
@@ -342,6 +341,10 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 def main():
+    if not TOKEN:
+        print("❌ Error: No se encontró la variable de entorno TELEGRAM_TOKEN.")
+        return
+        
     request_config = HTTPXRequest(read_timeout=30.0, connect_timeout=30.0)
     app = Application.builder().token(TOKEN).request(request_config).build()
     
