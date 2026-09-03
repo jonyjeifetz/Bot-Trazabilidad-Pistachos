@@ -56,33 +56,48 @@ async def enviar_bienvenida(update_or_query, context):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await enviar_bienvenida(update, context)
 
+async def mostrar_menu_filas(chat_id, context, session):
+    df_encontrado = session['df_encontrado']
+    keyboard = []
+    for index, row in df_encontrado.iterrows():
+        icon = "✅" if index in session['filas_seleccionadas'] else "🔲"
+        pedido = row.get('Pedido', 'S/N')
+        cliente = row.get('RazonSocial', 'Desconocido')
+        vendedor = row.get('Vendedor', 'S/V')
+        texto_boton = f"{icon} Ped: {pedido} | {cliente} ({vendedor})"
+        if len(texto_boton) > 60:
+            texto_boton = texto_boton[:57] + "..."
+        keyboard.append([InlineKeyboardButton(texto_boton, callback_data=f"sel_row_{index}")])
+    
+    keyboard.append([InlineKeyboardButton("✅ Confirmar Selección", callback_data="conf_filas")])
+    keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_proceso")])
+    
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text="📋 Acá tenés nuevamente el menú de selección de pedidos:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def mostrar_menu_columnas(chat_id, context, session):
+    keyboard = []
+    for campo_op in session['campos_disponibles']:
+        icon = "✅" if campo_op in session['columnas_seleccionadas'] else "🔲"
+        keyboard.append([InlineKeyboardButton(f"{icon} {campo_op}", callback_data=f"sel_col_{campo_op}")])
+    keyboard.append([InlineKeyboardButton("🚀 Generar Reporte", callback_data="conf_columnas")])
+    keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_proceso")])
+    
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text="📋 Acá tenés nuevamente el menú de selección de columnas:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
 async def manejar_saludos_o_busqueda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text.strip().lower()
     user_id = update.effective_user.id
     
     saludos = ["hola", "buen dia", "buenas", "buenas tardes", "buenos dias", "hey", "hi", "saludos", "que tal"]
     
-    if texto in saludos or texto in ["?", "ayuda", "help", "estoy perdido", "como es esto"]:
-        if user_id in user_sessions:
-            try:
-                await update.message.delete()
-            except Exception:
-                pass
-
-            await update.message.reply_text(
-                "Tranquilo, acá estoy. Veo que tenés una selección abierta.\n"
-                "• Tildá los pedidos que quieras en los botones de arriba y dale a 'Confirmar Selección'.\n"
-                "• Si querés cancelar todo, tocá el botón de cancelar o escribí 'cancelar'."
-            )
-        else:
-            if texto in saludos:
-                await enviar_bienvenida(update, context)
-            else:
-                await update.message.reply_text(
-                    "¿Te perdiste? No pasa nada. Mandame el número de pedido, el nombre/razon social del cliente o el nombre del vendedor que querés consultar."
-                )
-        return
-
     if texto in ["cancelar", "salir", "reiniciar"]:
         if user_id in user_sessions:
             del user_sessions[user_id]
@@ -95,12 +110,28 @@ async def manejar_saludos_o_busqueda(update: Update, context: ContextTypes.DEFAU
         except Exception:
             pass
 
+        session = user_sessions[user_id]
         await update.message.reply_text(
-            "⚠️ Che, tenés una selección pendiente arriba. "
-            "Terminá de elegir los botones o mandá 'cancelar' si querés hacer otra búsqueda."
+            "⚠️ Che, tenés una sesión pendiente. Te vuelvo a mostrar las opciones para que puedas continuar o mandá 'cancelar'."
         )
+        # Verificamos en qué paso está: si ya eligió filas y pasó a columnas, o si está eligiendo filas
+        if session.get('columnas_disponibles') or len(session.get('columnas_seleccionadas', [])) > 0 or session.get('paso') == 'columnas':
+            session['paso'] = 'columnas'
+            await mostrar_menu_columnas(update.effective_chat.id, context, session)
+        else:
+            session['paso'] = 'filas'
+            await mostrar_menu_filas(update.effective_chat.id, context, session)
         return
-        
+
+    if texto in saludos or texto in ["?", "ayuda", "help", "estoy perdido", "como es esto"]:
+        if texto in saludos:
+            await enviar_bienvenida(update, context)
+        else:
+            await update.message.reply_text(
+                "¿Te perdiste? No pasa nada. Mandame el número de pedido, el nombre/razón social del cliente o el nombre del vendedor que querés consultar."
+            )
+        return
+
     await recibir_texto_core(update, context)
 
 async def recibir_texto_core(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -133,7 +164,8 @@ async def recibir_texto_core(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_sessions[user_id] = {
         'df_encontrado': resultados,
         'filas_seleccionadas': [],
-        'columnas_seleccionadas': []
+        'columnas_seleccionadas': [],
+        'paso': 'filas'
     }
 
     keyboard = []
@@ -232,6 +264,7 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             campos_disponibles.append('Estado')
             
         session['campos_disponibles'] = campos_disponibles
+        session['paso'] = 'columnas'
         
         keyboard = []
         for campo in campos_disponibles:
@@ -303,6 +336,7 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.delete_message()
 
+        # Enviamos un mensaje completo independiente por cada cliente seleccionado con todas las columnas elegidas
         for index, row in df_filtrado.iterrows():
             pedido_val = row.get('Pedido', '-')
             cliente_val = row.get('RazonSocial', '-')
@@ -358,7 +392,6 @@ def main():
         print("❌ Error: No se encontró la variable de entorno TELEGRAM_TOKEN.")
         return
         
-    # Arrancamos Flask en un hilo separado (background) para satisfacer el requisito de puertos de Render
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
 
