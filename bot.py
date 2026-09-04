@@ -43,6 +43,33 @@ def cargar_datos():
         print("⚠️ No se encontró el archivo Excel en la ruta especificada.")
         return pd.DataFrame()
 
+def construir_texto_boton(icon, row, query_texto):
+    """Genera un texto adaptativo y limpio para el botón según lo que se esté buscando"""
+    pedido = row.get('Pedido', 'S/N')
+    cliente = row.get('RazonSocial', 'Desconocido')
+    vendedor = row.get('Vendedor', 'S/V')
+    fecha = row.get('Vtas_Fact_fecha', 'S/F')
+    
+    # Limpiamos la fecha para que quede cortita (ej: '15/05/2026')
+    if len(str(fecha)) >= 10 and '-' in str(fecha):
+        partes_fecha = str(fecha).split()[0].split('-')
+        if len(partes_fecha) == 3:
+            fecha = f"{partes_fecha[2]}/{partes_fecha[1]}/{partes_fecha[0]}"
+
+    # Armado dinámico inteligente con fecha, pedido, cliente y vendedor
+    if any(char.isdigit() for char in query_texto) and len(query_texto) >= 3 and query_texto in str(pedido).lower():
+        texto = f"{icon} 📅 {fecha} | Ped: {pedido} | {cliente} ({vendedor})"
+    elif query_texto in str(vendedor).lower():
+        texto = f"{icon} 📅 {fecha} | Vendedor: {vendedor} | Ped: {pedido} - {cliente}"
+    else:
+        texto = f"{icon} 📅 {fecha} | Ped: {pedido} | {cliente} ({vendedor})"
+
+    # Control de límite estricto de Telegram para botones
+    if len(texto) > 60:
+        texto = texto[:57] + "..."
+        
+    return texto
+
 async def enviar_bienvenida(update_or_query, context):
     texto_bienvenida = (
         "👋 ¡Hola! Soy tu bot de trazabilidad.\n\n"
@@ -61,7 +88,6 @@ async def manejar_saludos_o_busqueda(update: Update, context: ContextTypes.DEFAU
     texto = texto_crudo.lower()
     user_id = update.effective_user.id
     
-    # Capturamos cualquier variante de cancelar en cualquier momento del proceso
     if texto in ["cancelar", "salir", "reiniciar"]:
         if user_id in user_sessions:
             del user_sessions[user_id]
@@ -101,17 +127,11 @@ async def manejar_saludos_o_busqueda(update: Update, context: ContextTypes.DEFAU
 
 async def mostrar_menu_filas(chat_id, context, session):
     df_encontrado = session['df_encontrado']
+    query_texto = session.get('query_texto', '')
     keyboard = []
     for index, row in df_encontrado.iterrows():
         icon = "✅" if index in session['filas_seleccionadas'] else "🔲"
-        pedido = row.get('Pedido', 'S/N')
-        cliente = row.get('RazonSocial', 'Desconocido')
-        vendedor = row.get('Vendedor', 'S/V')
-        fecha = row.get('Vtas_Fact_fecha', 'S/F')
-        
-        texto_boton = f"{icon} Ped: {pedido} | {cliente} ({vendedor} - {fecha})"
-        if len(texto_boton) > 60:
-            texto_boton = texto_boton[:57] + "..."
+        texto_boton = construir_texto_boton(icon, row, query_texto)
         keyboard.append([InlineKeyboardButton(texto_boton, callback_data=f"sel_row_{index}")])
     
     keyboard.append([InlineKeyboardButton("✅ Confirmar Selección", callback_data="conf_filas")])
@@ -163,7 +183,6 @@ async def recibir_texto_core(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
-    # Intentamos ordenar de forma ascendente por la columna 'Pedido' si existe, para que vaya del más viejo al más nuevo
     try:
         resultados['Pedido_num'] = pd.to_numeric(resultados['Pedido'], errors='coerce')
         resultados = resultados.sort_values(by='Pedido_num', ascending=True)
@@ -174,6 +193,7 @@ async def recibir_texto_core(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id
     user_sessions[user_id] = {
         'df_encontrado': resultados,
+        'query_texto': query_texto,
         'filas_seleccionadas': [],
         'columnas_seleccionadas': [],
         'paso': 'filas'
@@ -181,16 +201,7 @@ async def recibir_texto_core(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     keyboard = []
     for index, row in resultados.iterrows():
-        pedido = row.get('Pedido', 'S/N')
-        cliente = row.get('RazonSocial', 'Desconocido')
-        vendedor = row.get('Vendedor', 'S/V')
-        fecha = row.get('Vtas_Fact_fecha', 'S/F')
-        
-        texto_boton = f"🔲 Ped: {pedido} | {cliente} ({vendedor} - {fecha})"
-        
-        if len(texto_boton) > 60:
-            texto_boton = texto_boton[:57] + "..."
-            
+        texto_boton = construir_texto_boton("🔲", row, query_texto)
         keyboard.append([InlineKeyboardButton(texto_boton, callback_data=f"sel_row_{index}")])
     
     keyboard.append([InlineKeyboardButton("✅ Confirmar Selección", callback_data="conf_filas")])
@@ -227,6 +238,7 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     session = user_sessions[user_id]
     df_encontrado = session['df_encontrado']
+    query_texto = session.get('query_texto', '')
 
     if data.startswith("sel_row_"):
         row_idx = int(data.replace("sel_row_", ""))
@@ -238,14 +250,7 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = []
         for index, row in df_encontrado.iterrows():
             icon = "✅" if index in session['filas_seleccionadas'] else "🔲"
-            pedido = row.get('Pedido', 'S/N')
-            cliente = row.get('RazonSocial', 'Desconocido')
-            vendedor = row.get('Vendedor', 'S/V')
-            fecha = row.get('Vtas_Fact_fecha', 'S/F')
-            
-            texto_boton = f"{icon} Ped: {pedido} | {cliente} ({vendedor} - {fecha})"
-            if len(texto_boton) > 60:
-                texto_boton = texto_boton[:57] + "..."
+            texto_boton = construir_texto_boton(icon, row, query_texto)
             keyboard.append([InlineKeyboardButton(texto_boton, callback_data=f"sel_row_{index}")])
             
         keyboard.append([InlineKeyboardButton("✅ Confirmar Selección", callback_data="conf_filas")])
@@ -257,14 +262,7 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = []
             for index, row in df_encontrado.iterrows():
                 icon = "✅" if index in session['filas_seleccionadas'] else "🔲"
-                pedido = row.get('Pedido', 'S/N')
-                cliente = row.get('RazonSocial', 'Desconocido')
-                vendedor = row.get('Vendedor', 'S/V')
-                fecha = row.get('Vtas_Fact_fecha', 'S/F')
-                
-                texto_boton = f"{icon} Ped: {pedido} | {cliente} ({vendedor} - {fecha})"
-                if len(texto_boton) > 60:
-                    texto_boton = texto_boton[:57] + "..."
+                texto_boton = construir_texto_boton(icon, row, query_texto)
                 keyboard.append([InlineKeyboardButton(texto_boton, callback_data=f"sel_row_{index}")])
             
             keyboard.append([InlineKeyboardButton("✅ Confirmar Selección", callback_data="conf_filas")])
