@@ -67,8 +67,8 @@ def construir_texto_boton(icon, row, query_texto):
         # Si busco por vendedor: Fecha | Nombre Cliente | Numero | Vendedor
         texto = f"{icon} 📅 {fecha} | {cliente} | Ped: {pedido} | {vendedor}"
     else:
-        # Por defecto o si busco por cliente: Numero | Nombre Cliente | Fecha | Vendedor
-        texto = f"{icon} Ped: {pedido} | {cliente} | 📅 {fecha} | {vendedor}"
+        # Si busco por cliente: Numero | Fecha | Vendedor | Nombre Cliente
+        texto = f"{icon} Ped: {pedido} | 📅 {fecha} | {vendedor} | {cliente}"
 
     # Control de límite estricto de Telegram para botones (máximo ~60 caracteres)
     if len(texto) > 60:
