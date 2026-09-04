@@ -114,7 +114,6 @@ async def manejar_saludos_o_busqueda(update: Update, context: ContextTypes.DEFAU
         await update.message.reply_text(
             "⚠️ Che, tenés una sesión pendiente. Te vuelvo a mostrar las opciones para que puedas continuar o mandá 'cancelar'."
         )
-        # Verificamos en qué paso está: si ya eligió filas y pasó a columnas, o si está eligiendo filas
         if session.get('columnas_disponibles') or len(session.get('columnas_seleccionadas', [])) > 0 or session.get('paso') == 'columnas':
             session['paso'] = 'columnas'
             await mostrar_menu_columnas(update.effective_chat.id, context, session)
@@ -259,9 +258,19 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        campos_disponibles = list(df_encontrado.columns)
-        if 'Estado' not in campos_disponibles:
-            campos_disponibles.append('Estado')
+        # Columnas excluidas del menú de selección visual
+        columnas_excluidas = {
+            'Ítem', 'Artículo', 'CodColor', 'Vtas_Fact_PDF', 'Vtas_Remito_PDF',
+            'Rom_Mov_Tipo', 'Rom_Mov_Numero', 'Vtas_Fact_fecha', 'PD_Id',
+            'Alta', 'Asignado', 'EnPr', 'Prep', 'ARom', 'Roma', 'Fac',
+            'Lib', 'Ent', 'desh', 'Con', 'Baja', 'Anul'
+        }
+
+        campos_brutos = list(df_encontrado.columns)
+        if 'Estado' not in campos_brutos:
+            campos_brutos.append('Estado')
+            
+        campos_disponibles = [col for col in campos_brutos if col not in columnas_excluidas]
             
         session['campos_disponibles'] = campos_disponibles
         session['paso'] = 'columnas'
