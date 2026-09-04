@@ -56,6 +56,49 @@ async def enviar_bienvenida(update_or_query, context):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await enviar_bienvenida(update, context)
 
+async def manejar_saludos_o_busqueda(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto_crudo = update.message.text.strip()
+    texto = texto_crudo.lower()
+    user_id = update.effective_user.id
+    
+    # Capturamos cualquier variante de cancelar en cualquier momento del proceso
+    if texto in ["cancelar", "salir", "reiniciar"]:
+        if user_id in user_sessions:
+            del user_sessions[user_id]
+        await update.message.reply_text("🚫 Operación cancelada. Escribime cuando quieras para hacer otra búsqueda.")
+        return
+
+    saludos = ["hola", "buen dia", "buenas", "buenas tardes", "buenos dias", "hey", "hi", "saludos", "que tal"]
+
+    if user_id in user_sessions:
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+
+        session = user_sessions[user_id]
+        await update.message.reply_text(
+            "⚠️ Che, tenés una sesión pendiente. Te vuelvo a mostrar las opciones para que puedas continuar (o mandá 'cancelar' para cortar)."
+        )
+        if session.get('columnas_disponibles') or len(session.get('columnas_seleccionadas', [])) > 0 or session.get('paso') == 'columnas':
+            session['paso'] = 'columnas'
+            await mostrar_menu_columnas(update.effective_chat.id, context, session)
+        else:
+            session['paso'] = 'filas'
+            await mostrar_menu_filas(update.effective_chat.id, context, session)
+        return
+
+    if texto in saludos or texto in ["?", "ayuda", "help", "estoy perdido", "como es esto"]:
+        if texto in saludos:
+            await enviar_bienvenida(update, context)
+        else:
+            await update.message.reply_text(
+                "¿Te perdiste? No pasa nada. Mandame el número de pedido, el nombre/razón social del cliente o el nombre del vendedor que querés consultar."
+            )
+        return
+
+    await recibir_texto_core(update, context)
+
 async def mostrar_menu_filas(chat_id, context, session):
     df_encontrado = session['df_encontrado']
     keyboard = []
@@ -64,7 +107,9 @@ async def mostrar_menu_filas(chat_id, context, session):
         pedido = row.get('Pedido', 'S/N')
         cliente = row.get('RazonSocial', 'Desconocido')
         vendedor = row.get('Vendedor', 'S/V')
-        texto_boton = f"{icon} Ped: {pedido} | {cliente} ({vendedor})"
+        fecha = row.get('Vtas_Fact_fecha', 'S/F')
+        
+        texto_boton = f"{icon} Ped: {pedido} | {cliente} ({vendedor} - {fecha})"
         if len(texto_boton) > 60:
             texto_boton = texto_boton[:57] + "..."
         keyboard.append([InlineKeyboardButton(texto_boton, callback_data=f"sel_row_{index}")])
@@ -92,47 +137,6 @@ async def mostrar_menu_columnas(chat_id, context, session):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-async def manejar_saludos_o_busqueda(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    texto = update.message.text.strip().lower()
-    user_id = update.effective_user.id
-    
-    saludos = ["hola", "buen dia", "buenas", "buenas tardes", "buenos dias", "hey", "hi", "saludos", "que tal"]
-    
-    if texto in ["cancelar", "salir", "reiniciar"]:
-        if user_id in user_sessions:
-            del user_sessions[user_id]
-        await update.message.reply_text("Listorti, cancelamos lo anterior. ¿Qué andás buscando ahora?")
-        return
-
-    if user_id in user_sessions:
-        try:
-            await update.message.delete()
-        except Exception:
-            pass
-
-        session = user_sessions[user_id]
-        await update.message.reply_text(
-            "⚠️ Che, tenés una sesión pendiente. Te vuelvo a mostrar las opciones para que puedas continuar o mandá 'cancelar'."
-        )
-        if session.get('columnas_disponibles') or len(session.get('columnas_seleccionadas', [])) > 0 or session.get('paso') == 'columnas':
-            session['paso'] = 'columnas'
-            await mostrar_menu_columnas(update.effective_chat.id, context, session)
-        else:
-            session['paso'] = 'filas'
-            await mostrar_menu_filas(update.effective_chat.id, context, session)
-        return
-
-    if texto in saludos or texto in ["?", "ayuda", "help", "estoy perdido", "como es esto"]:
-        if texto in saludos:
-            await enviar_bienvenida(update, context)
-        else:
-            await update.message.reply_text(
-                "¿Te perdiste? No pasa nada. Mandame el número de pedido, el nombre/razón social del cliente o el nombre del vendedor que querés consultar."
-            )
-        return
-
-    await recibir_texto_core(update, context)
-
 async def recibir_texto_core(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query_texto = ' '.join(update.message.text.strip().lower().split())
     
@@ -159,6 +163,14 @@ async def recibir_texto_core(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
+    # Intentamos ordenar de forma ascendente por la columna 'Pedido' si existe, para que vaya del más viejo al más nuevo
+    try:
+        resultados['Pedido_num'] = pd.to_numeric(resultados['Pedido'], errors='coerce')
+        resultados = resultados.sort_values(by='Pedido_num', ascending=True)
+        resultados = resultados.drop(columns=['Pedido_num'])
+    except Exception:
+        pass
+
     user_id = update.effective_user.id
     user_sessions[user_id] = {
         'df_encontrado': resultados,
@@ -172,7 +184,9 @@ async def recibir_texto_core(update: Update, context: ContextTypes.DEFAULT_TYPE)
         pedido = row.get('Pedido', 'S/N')
         cliente = row.get('RazonSocial', 'Desconocido')
         vendedor = row.get('Vendedor', 'S/V')
-        texto_boton = f"🔲 Ped: {pedido} | {cliente} ({vendedor})"
+        fecha = row.get('Vtas_Fact_fecha', 'S/F')
+        
+        texto_boton = f"🔲 Ped: {pedido} | {cliente} ({vendedor} - {fecha})"
         
         if len(texto_boton) > 60:
             texto_boton = texto_boton[:57] + "..."
@@ -183,7 +197,7 @@ async def recibir_texto_core(update: Update, context: ContextTypes.DEFAULT_TYPE)
     keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_proceso")])
     
     await update.message.reply_text(
-        f"🔍 Encontré {len(resultados)} coincidencias. Tildá las que necesites y dale a confirmar:",
+        f"🔍 Encontré {len(resultados)} coincidencias (ordenadas de más vieja a más nueva). Tildá las que necesites y dale a confirmar:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -226,7 +240,10 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             icon = "✅" if index in session['filas_seleccionadas'] else "🔲"
             pedido = row.get('Pedido', 'S/N')
             cliente = row.get('RazonSocial', 'Desconocido')
-            texto_boton = f"{icon} Ped: {pedido} | {cliente}"
+            vendedor = row.get('Vendedor', 'S/V')
+            fecha = row.get('Vtas_Fact_fecha', 'S/F')
+            
+            texto_boton = f"{icon} Ped: {pedido} | {cliente} ({vendedor} - {fecha})"
             if len(texto_boton) > 60:
                 texto_boton = texto_boton[:57] + "..."
             keyboard.append([InlineKeyboardButton(texto_boton, callback_data=f"sel_row_{index}")])
@@ -243,7 +260,9 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pedido = row.get('Pedido', 'S/N')
                 cliente = row.get('RazonSocial', 'Desconocido')
                 vendedor = row.get('Vendedor', 'S/V')
-                texto_boton = f"{icon} Ped: {pedido} | {cliente} ({vendedor})"
+                fecha = row.get('Vtas_Fact_fecha', 'S/F')
+                
+                texto_boton = f"{icon} Ped: {pedido} | {cliente} ({vendedor} - {fecha})"
                 if len(texto_boton) > 60:
                     texto_boton = texto_boton[:57] + "..."
                 keyboard.append([InlineKeyboardButton(texto_boton, callback_data=f"sel_row_{index}")])
@@ -258,7 +277,6 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # Columnas excluidas del menú de selección visual
         columnas_excluidas = {
             'Ítem', 'Artículo', 'CodColor', 'Vtas_Fact_PDF', 'Vtas_Remito_PDF',
             'Rom_Mov_Tipo', 'Rom_Mov_Numero', 'Vtas_Fact_fecha', 'PD_Id',
@@ -345,7 +363,6 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.delete_message()
 
-        # Enviamos un mensaje completo independiente por cada cliente seleccionado con todas las columnas elegidas
         for index, row in df_filtrado.iterrows():
             pedido_val = row.get('Pedido', '-')
             cliente_val = row.get('RazonSocial', '-')
