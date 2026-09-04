@@ -44,7 +44,7 @@ def cargar_datos():
         return pd.DataFrame()
 
 def construir_texto_boton(icon, row, query_texto):
-    """Genera un texto adaptativo y limpio para el botón según lo que se esté buscando"""
+    """Genera un texto adaptativo y limpio para el botón ordenado exactamente según el tipo de búsqueda"""
     pedido = row.get('Pedido', 'S/N')
     cliente = row.get('RazonSocial', 'Desconocido')
     vendedor = row.get('Vendedor', 'S/V')
@@ -56,15 +56,21 @@ def construir_texto_boton(icon, row, query_texto):
         if len(partes_fecha) == 3:
             fecha = f"{partes_fecha[2]}/{partes_fecha[1]}/{partes_fecha[0]}"
 
-    # Armado dinámico inteligente con fecha, pedido, cliente y vendedor
-    if any(char.isdigit() for char in query_texto) and len(query_texto) >= 3 and query_texto in str(pedido).lower():
-        texto = f"{icon} 📅 {fecha} | Ped: {pedido} | {cliente} ({vendedor})"
-    elif query_texto in str(vendedor).lower():
-        texto = f"{icon} 📅 {fecha} | Vendedor: {vendedor} | Ped: {pedido} - {cliente}"
-    else:
-        texto = f"{icon} 📅 {fecha} | Ped: {pedido} | {cliente} ({vendedor})"
+    # Detectamos el tipo de búsqueda según lo que ingresó el usuario
+    es_pedido = any(char.isdigit() for char in query_texto) and len(query_texto) >= 3 and query_texto in str(pedido).lower()
+    es_vendedor = query_texto in str(vendedor).lower()
 
-    # Control de límite estricto de Telegram para botones
+    if es_pedido:
+        # Si busco por numero de pedido: Fecha | Nombre Cliente | Vendedor | Numero
+        texto = f"{icon} 📅 {fecha} | {cliente} | {vendedor} | Ped: {pedido}"
+    elif es_vendedor:
+        # Si busco por vendedor: Fecha | Nombre Cliente | Numero | Vendedor
+        texto = f"{icon} 📅 {fecha} | {cliente} | Ped: {pedido} | {vendedor}"
+    else:
+        # Por defecto o si busco por cliente: Numero | Nombre Cliente | Fecha | Vendedor
+        texto = f"{icon} Ped: {pedido} | {cliente} | 📅 {fecha} | {vendedor}"
+
+    # Control de límite estricto de Telegram para botones (máximo ~60 caracteres)
     if len(texto) > 60:
         texto = texto[:57] + "..."
         
