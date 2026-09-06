@@ -307,7 +307,7 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         campos_disponibles = [col for col in campos_brutos if col not in columnas_excluidas]
         session['campos_disponibles'] = campos_disponibles
         session['paso'] = 'columnas'
-        session['columnas_seleccionadas'] = []  # <--- CORREGIDO: Las columnas arrancan desmarcadas
+        session['columnas_seleccionadas'] = []
         
         keyboard = []
         for campo in campos_disponibles:
@@ -419,7 +419,8 @@ async def realizar_busqueda_optimizada(update_or_query, context, tipo_filtro, qu
             df = df[df['Vendedor'].str.lower().str.contains(vendedor_asignado, na=False)]
 
     if tipo_filtro == 'vendedor' and 'Vendedor' in df.columns:
-        resultados = df[df['Vendedor'].str.lower().str.contains(query_lower, na=False)].copy()
+        query_limpia = query_lower.replace('_', ' ')
+        resultados = df[df['Vendedor'].str.lower().str.replace('_', ' ').str.contains(query_limpia, na=False)].copy()
     elif tipo_filtro == 'cliente' and 'RazonSocial' in df.columns:
         resultados = df[df['RazonSocial'].str.lower().str.contains(query_lower, na=False)].copy()
     elif tipo_filtro == 'pedido' and 'Pedido' in df.columns:
@@ -451,14 +452,14 @@ async def realizar_busqueda_optimizada(update_or_query, context, tipo_filtro, qu
     user_sessions[user_id].update({
         'df_encontrado': resultados,
         'query_texto': query_texto,
-        'filas_seleccionadas': [],  # Inicia vacío
+        'filas_seleccionadas': [],
         'columnas_seleccionadas': [],
         'paso': 'filas'
     })
 
     keyboard = []
     for index, row in resultados.iterrows():
-        icon = "🔲"  # Empiezan desmarcados
+        icon = "🔲"
         texto_btn = construir_texto_boton(icon, row, query_texto)
         keyboard.append([InlineKeyboardButton(texto_btn, callback_data=f"sel_row_{index}")])
     
@@ -479,7 +480,7 @@ def main():
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
 
-    request_config = HTTPXRequest(read_timeout=30.0, connect_timeout=30.0)
+    request_config = HTTPXRequest(read_timeout=60.0, connect_timeout=60.0)
     app = Application.builder().token(TOKEN).request(request_config).build()
     
     app.add_handler(CommandHandler("start", start))
