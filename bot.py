@@ -255,6 +255,112 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await realizar_busqueda_optimizada(query, context, 'vendedor', vendedor_nombre)
         return
 
+    # Manejo de selección de un Año-Mes específico
+    if data.startswith("mes_"):
+        anio_mes = data.replace("mes_", "")
+        session = user_sessions.get(user_id, {})
+        df_encontrado = session.get('df_encontrado')
+        query_texto = session.get('query_texto', '')
+
+        if df_encontrado is None or df_encontrado.empty:
+            await query.edit_message_text("⚠️ No hay resultados en la sesión actual.")
+            return
+
+        # Filtrar el DataFrame por el año y mes seleccionado
+        def extraer_anio_mes(val):
+            val_str = str(val)
+            if len(val_str) >= 7:
+                return val_str[:7] # Formato YYYY-MM
+            return ""
+
+        df_encontrado['AnioMes'] = df_encontrado['Vtas_Fact_fecha'].apply(extraer_anio_mes)
+        df_filtrado_mes = df_encontrado[df_encontrado['AnioMes'] == anio_mes].copy()
+
+        session['df_encontrado'] = df_filtrado_mes
+        total_mes = len(df_filtrado_mes)
+
+        keyboard = []
+        for index, row in df_filtrado_mes.head(30).iterrows():
+            icon = "🔲"
+            texto_btn = construir_texto_boton(icon, row, query_texto)
+            keyboard.append([InlineKeyboardButton(texto_btn, callback_data=f"sel_row_{index}")])
+        
+        keyboard.append([InlineKeyboardButton("✅ Confirmar Selección", callback_data="conf_filas")])
+        keyboard.append([InlineKeyboardButton("⬅️ Volver a elegir Meses", callback_data="volver_a_meses")])
+        keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_proceso")])
+
+        meses_nombres = {
+            "01": "Enero", "02": "Febrero", "03": "Marzo", "04": "Abril", 
+            "05": "Mayo", "06": "Junio", "07": "Julio", "08": "Agosto", 
+            "09": "Septiembre", "10": "Octubre", "11": "Noviembre", "12": "Diciembre"
+        }
+        partes_ym = anio_mes.split("-")
+        nombre_mes_txt = f"{meses_nombres.get(partes_ym[1], partes_ym[1])} {partes_ym[0]}" if len(partes_ym) == 2 else anio_mes
+
+        await query.edit_message_text(
+            f"📅 Período: **{nombre_mes_txt}** ({total_mes} ventas).\nSeleccioná los elementos que necesites:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+        return
+
+    if data == "volver_a_meses" or data == "descargar_todo_excel":
+        # Recargar la búsqueda original para mostrar el menú de meses de nuevo
+        session = user_sessions.get(user_id, {})
+        if data == "descargar_todo_excel":
+            df_orig = session.get('df_original_completo')
+            if df_orig is not None and not df_orig.empty:
+                await query.delete_message()
+                buffer_excel = io.BytesIO()
+                df_orig.to_excel(buffer_excel, index=False)
+                buffer_excel.seek(0)
+                await context.bot.send_document(
+                    chat_id=query.message.chat_id,
+                    document=buffer_excel,
+                    filename="Reporte_Completo.xlsx",
+                    caption="📥 Acá tenés el archivo Excel completo con todas las ventas del vendedor."
+                )
+            return
+
+        # Si vuelve a meses, reconstruimos la vista de selección de mes
+        df_orig = session.get('df_original_completo')
+        if df_orig is not None:
+            session['df_encontrado'] = df_orig
+            query_texto = session.get('query_texto', '')
+            
+            def extraer_anio_mes(val):
+                val_str = str(val)
+                if len(val_str) >= 7:
+                    return val_str[:7]
+                return "Sin Fecha"
+
+            df_orig['AnioMes'] = df_orig['Vtas_Fact_fecha'].apply(extraer_anio_mes)
+            meses_disponibles = sorted(df_orig['AnioMes'].unique(), reverse=True)
+
+            keyboard = []
+            meses_nombres = {
+                "01": "Enero", "02": "Febrero", "03": "Marzo", "04": "Abril", 
+                "05": "Mayo", "06": "Junio", "07": "Julio", "08": "Agosto", 
+                "09": "Septiembre", "10": "Octubre", "11": "Noviembre", "12": "Diciembre"
+            }
+
+            for ym in meses_disponibles:
+                if ym and ym != "Sin Fecha" and len(ym.split("-")) == 2:
+                    y, m = ym.split("-")
+                    m_nombre = meses_nombres.get(m, m)
+                    label = f"📅 {m_nombre} {y}"
+                    keyboard.append([InlineKeyboardButton(label, callback_data=f"mes_{ym}")])
+
+            keyboard.append([InlineKeyboardButton(f"📥 Descargar Excel Completo ({len(df_orig)} reg.)", callback_data="descargar_todo_excel")])
+            keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_proceso")])
+
+            await query.edit_message_text(
+                f"⚠️ **{query_texto}** tiene muchos registros. Seleccioná el mes que querés consultar:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+        return
+
     if data == "post_si":
         if user_id in user_sessions:
             user_sessions[user_id].clear()
@@ -279,12 +385,13 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             session['filas_seleccionadas'].append(row_idx)
             
         keyboard = []
-        for index, row in df_encontrado.iterrows():
+        for index, row in df_encontrado.head(30).iterrows():
             icon = "✅" if index in session['filas_seleccionadas'] else "🔲"
             texto_btn = construir_texto_boton(icon, row, query_texto)
             keyboard.append([InlineKeyboardButton(texto_btn, callback_data=f"sel_row_{index}")])
             
         keyboard.append([InlineKeyboardButton("✅ Confirmar Selección", callback_data="conf_filas")])
+        keyboard.append([InlineKeyboardButton("⬅️ Volver a elegir Meses", callback_data="volver_a_meses")])
         keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_proceso")])
         await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -451,11 +558,49 @@ async def realizar_busqueda_optimizada(update_or_query, context, tipo_filtro, qu
         
     user_sessions[user_id].update({
         'df_encontrado': resultados,
+        'df_original_completo': resultados.copy(),
         'query_texto': query_texto,
         'filas_seleccionadas': [],
         'columnas_seleccionadas': [],
         'paso': 'filas'
     })
+
+    total_resultados = len(resultados)
+
+    # Si supera los 25 resultados, ofrecemos agrupar por Mes automáticamente
+    if total_resultados > 25 and 'Vtas_Fact_fecha' in resultados.columns:
+        def extraer_anio_mes(val):
+            val_str = str(val)
+            if len(val_str) >= 7:
+                return val_str[:7]
+            return "Sin Fecha"
+
+        resultados['AnioMes'] = resultados['Vtas_Fact_fecha'].apply(extraer_anio_mes)
+        meses_disponibles = sorted(resultados['AnioMes'].unique(), reverse=True)
+
+        keyboard = []
+        meses_nombres = {
+            "01": "Enero", "02": "Febrero", "03": "Marzo", "04": "Abril", 
+            "05": "Mayo", "06": "Junio", "07": "Julio", "08": "Agosto", 
+            "09": "Septiembre", "10": "Octubre", "11": "Noviembre", "12": "Diciembre"
+        }
+
+        for ym in meses_disponibles:
+            if ym and ym != "Sin Fecha" and len(ym.split("-")) == 2:
+                y, m = ym.split("-")
+                m_nombre = meses_nombres.get(m, m)
+                label = f"📅 {m_nombre} {y}"
+                keyboard.append([InlineKeyboardButton(label, callback_data=f"mes_{ym}")])
+
+        keyboard.append([InlineKeyboardButton(f"📥 Descargar Excel Completo ({total_resultados} reg.)", callback_data="descargar_todo_excel")])
+        keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_proceso")])
+
+        texto_resp = f"⚠️ **{query_texto}** tiene {total_resultados} registros en total.\n\nPara no saturar la pantalla, seleccioná el **mes y año** que querés consultar:"
+        if hasattr(update_or_query, 'message') and update_or_query.message:
+            await update_or_query.message.reply_text(texto_resp, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        else:
+            await context.bot.send_message(chat_id=chat_id, text=texto_resp, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        return
 
     keyboard = []
     for index, row in resultados.iterrows():
@@ -466,7 +611,7 @@ async def realizar_busqueda_optimizada(update_or_query, context, tipo_filtro, qu
     keyboard.append([InlineKeyboardButton("✅ Confirmar Selección", callback_data="conf_filas")])
     keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_proceso")])
     
-    texto_resp = f"🔍 Encontré {len(resultados)} resultados. Seleccioná los que necesites:"
+    texto_resp = f"🔍 Encontré {total_resultados} resultados. Seleccioná los que necesites:"
     if hasattr(update_or_query, 'message') and update_or_query.message:
         await update_or_query.message.reply_text(texto_resp, reply_markup=InlineKeyboardMarkup(keyboard))
     else:
