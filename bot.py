@@ -7,7 +7,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Keyboar
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
-# Configuración de Flask para mantener el servicio activo en la nube
 app_flask = Flask(__name__)
 
 @app_flask.route('/')
@@ -18,25 +17,20 @@ def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app_flask.run(host="0.0.0.0", port=port)
 
-# Token y configuración de archivos
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 EXCEL_PATH = "datos_pedidos.xlsx"
 NOMBRE_HOJA = "Pedidos_Pistachos (2)" 
 
-# Memoria global de sesiones y teléfonos verificados (persiste en ejecución)
 user_sessions = {}
-telefonos_verificados = {} # {user_id: {"telefono": "...", "rol": "...", "nombre_vendedor": "..."}}
+telefonos_verificados = {}
 
-# Definición de roles por número de teléfono
 ADMIN_PHONES = {
     "541153248379",
     "541156680181",
     "541133635660"
 }
 
-VENDEDORES_MAP = {
-    # "541112345678": "Nombre Vendedor En Excel"
-}
+VENDEDORES_MAP = {}
 
 def limpiar_telefono(tel_str):
     if not tel_str:
@@ -141,7 +135,6 @@ async def mostrar_menu_principal_admin(update_or_query, context):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     texto = "🎛️ **Menú Principal**\n\n¿Qué te gustaría consultar hoy?"
-    
     await enviar_o_editar_mensaje(update_or_query, context, texto, reply_markup)
 
 async def mostrar_menu_principal_vendedor(update_or_query, context):
@@ -152,7 +145,6 @@ async def mostrar_menu_principal_vendedor(update_or_query, context):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     texto = "👤 **Menú de Vendedor**\n\nSeleccioná una opción para gestionar tus cuentas:"
-    
     await enviar_o_editar_mensaje(update_or_query, context, texto, reply_markup)
 
 async def enviar_o_editar_mensaje(update_or_query, context, texto, reply_markup):
@@ -220,7 +212,6 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("⚠️ No hay datos cargados en el Excel actualmente.")
             return
 
-        keyboard = []
         columna_objetivo = None
         if tipo == 'vendedor':
             columna_objetivo = 'Vendedor'
@@ -229,28 +220,34 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif tipo == 'pedido':
             columna_objetivo = 'Pedido'
 
+        keyboard = []
         if columna_objetivo and columna_objetivo in df.columns:
             unicos = df[columna_objetivo].dropna().astype(str).unique()
             unicos = [u for u in unicos if u.strip() and u.lower() != 'nan'][:30]
             
-            for item in unicos:
-                keyboard.append([InlineKeyboardButton(f"📌 {item}", callback_data=f"filtrar_val_{tipo}_{item}")])
+            # Guardamos la lista en la sesión para recuperarla por índice seguro sin problemas de longitud
+            user_sessions[user_id]['lista_opciones'] = unicos
+            
+            for idx, item in enumerate(unicos):
+                keyboard.append([InlineKeyboardButton(f"📌 {item}", callback_data=f"opt_{tipo}_{idx}")])
 
         keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_proceso")])
         
-        texto_opciones = (
-            f"📋 **Seleccioná un {tipo} de la lista** o simplemente **escribí en el chat** el nombre/número que buscás para agilizar:"
-        )
+        texto_opciones = f"📋 **Seleccioná un {tipo} de la lista** o escribí directamente en el chat:"
         await query.edit_message_text(texto_opciones, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return
 
-    if data.startswith("filtrar_val_"):
+    if data.startswith("opt_"):
         partes = data.split("_", 2)
         if len(partes) >= 3:
             tipo = partes[1]
-            valor_seleccionado = partes[2]
-            user_sessions[user_id]['modo_busqueda'] = tipo
-            await realizar_busqueda_optimizada(query, context, tipo, valor_seleccionado)
+            idx = int(partes[2])
+            session = user_sessions.get(user_id, {})
+            lista_opciones = session.get('lista_opciones', [])
+            if idx < len(lista_opciones):
+                valor_seleccionado = lista_opciones[idx]
+                session['modo_busqueda'] = tipo
+                await realizar_busqueda_optimizada(query, context, tipo, valor_seleccionado)
         return
 
     if data == "vendedor_ver_mis_pedidos":
@@ -315,8 +312,7 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         keyboard = []
         for campo in campos_disponibles:
-            icon = "✅"
-            keyboard.append([InlineKeyboardButton(f"{icon} {campo}", callback_data=f"sel_col_{campo}")])
+            keyboard.append([InlineKeyboardButton(f"✅ {campo}", callback_data=f"sel_col_{campo}")])
         keyboard.append([InlineKeyboardButton("🚀 Generar Reporte", callback_data="conf_columnas")])
         keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_proceso")])
         
