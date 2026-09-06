@@ -21,7 +21,6 @@ def run_flask():
 # Token y configuración de archivos
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 EXCEL_PATH = "datos_pedidos.xlsx"
-# Compatible con ambos entornos (trazabilidad normal o pistachos)
 NOMBRE_HOJA = "Pedidos_Pistachos (2)" 
 
 # Memoria global de sesiones y teléfonos verificados (persiste en ejecución)
@@ -82,7 +81,6 @@ def construir_texto_boton(icon, row, query_texto):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
-    # Si ya compartió su contacto alguna vez, lo saludamos humano y directo
     if user_id in telefonos_verificados:
         await mostrar_menu_segun_rol(update, context, user_id)
         return
@@ -190,11 +188,9 @@ async def manejar_interaccion_chat(update: Update, context: ContextTypes.DEFAULT
     session = user_sessions.get(user_id, {})
     modo = session.get('modo_busqueda')
 
-    # Si está esperando texto libre porque escribió directamente o eligió filtrar por texto
     if modo:
         await realizar_busqueda_optimizada(update, context, modo, texto_crudo)
     else:
-        # Si mandó texto suelto sin elegir menú, interpretamos saludo o búsqueda libre amigable
         await realizar_busqueda_optimizada(update, context, 'libre', texto_crudo)
 
 async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -224,7 +220,6 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("⚠️ No hay datos cargados en el Excel actualmente.")
             return
 
-        # Generar lista rápida de opciones según el tipo de búsqueda elegida
         keyboard = []
         columna_objetivo = None
         if tipo == 'vendedor':
@@ -235,12 +230,10 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             columna_objetivo = 'Pedido'
 
         if columna_objetivo and columna_objetivo in df.columns:
-            # Obtener valores únicos ordenados (máximo los primeros 30 para no saturar el bot)
             unicos = df[columna_objetivo].dropna().astype(str).unique()
             unicos = [u for u in unicos if u.strip() and u.lower() != 'nan'][:30]
             
             for item in unicos:
-                # Callback corto para filtrar directamente por ese valor exacto
                 keyboard.append([InlineKeyboardButton(f"📌 {item}", callback_data=f"filtrar_val_{tipo}_{item}")])
 
         keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_proceso")])
@@ -252,9 +245,12 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data.startswith("filtrar_val_"):
-        _, tipo, valor_seleccionado = data.split("_", 2)
-        user_sessions[user_id]['modo_busqueda'] = tipo
-        await realizar_busqueda_optimizada(query, context, tipo, valor_seleccionado)
+        partes = data.split("_", 2)
+        if len(partes) >= 3:
+            tipo = partes[1]
+            valor_seleccionado = partes[2]
+            user_sessions[user_id]['modo_busqueda'] = tipo
+            await realizar_busqueda_optimizada(query, context, tipo, valor_seleccionado)
         return
 
     if data == "vendedor_ver_mis_pedidos":
@@ -315,11 +311,11 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         campos_disponibles = [col for col in campos_brutos if col not in columnas_excluidas]
         session['campos_disponibles'] = campos_disponibles
         session['paso'] = 'columnas'
-        session['columnas_seleccionadas'] = campos_disponibles.copy() # Seleccionadas por defecto para mayor agilidad
+        session['columnas_seleccionadas'] = campos_disponibles.copy()
         
         keyboard = []
         for campo in campos_disponibles:
-            icon = "✅" # Por defecto marcadas
+            icon = "✅"
             keyboard.append([InlineKeyboardButton(f"{icon} {campo}", callback_data=f"sel_col_{campo}")])
         keyboard.append([InlineKeyboardButton("🚀 Generar Reporte", callback_data="conf_columnas")])
         keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_proceso")])
@@ -460,7 +456,7 @@ async def realizar_busqueda_optimizada(update_or_query, context, tipo_filtro, qu
     user_sessions[user_id].update({
         'df_encontrado': resultados,
         'query_texto': query_texto,
-        'filas_seleccionadas': list(resultados.index)[:15], # Seleccionados por defecto los primeros para agilizar
+        'filas_seleccionadas': list(resultados.index)[:15],
         'columnas_seleccionadas': [],
         'paso': 'filas'
     })
