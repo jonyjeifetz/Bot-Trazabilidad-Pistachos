@@ -72,6 +72,11 @@ def construir_texto_boton(icon, row, query_texto):
         texto = texto[:57] + "..."
     return texto
 
+def obtener_anio_mes_serie(serie_fechas):
+    # Convierte de forma segura usando Vtas_Fact_fecha a YYYY-MM
+    fechas_dt = pd.to_datetime(serie_fechas, errors='coerce', dayfirst=True)
+    return fechas_dt.dt.strftime('%Y-%m').fillna("Sin Fecha")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
@@ -255,26 +260,18 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await realizar_busqueda_optimizada(query, context, 'vendedor', vendedor_nombre)
         return
 
-    # Manejo de selección de un Año-Mes específico
     if data.startswith("mes_"):
         anio_mes = data.replace("mes_", "")
         session = user_sessions.get(user_id, {})
-        df_encontrado = session.get('df_encontrado')
+        df_completo = session.get('df_original_completo')
         query_texto = session.get('query_texto', '')
 
-        if df_encontrado is None or df_encontrado.empty:
+        if df_completo is None or df_completo.empty:
             await query.edit_message_text("⚠️ No hay resultados en la sesión actual.")
             return
 
-        # Filtrar el DataFrame por el año y mes seleccionado
-        def extraer_anio_mes(val):
-            val_str = str(val)
-            if len(val_str) >= 7:
-                return val_str[:7] # Formato YYYY-MM
-            return ""
-
-        df_encontrado['AnioMes'] = df_encontrado['Vtas_Fact_fecha'].apply(extraer_anio_mes)
-        df_filtrado_mes = df_encontrado[df_encontrado['AnioMes'] == anio_mes].copy()
+        df_completo['AnioMes'] = obtener_anio_mes_serie(df_completo['Vtas_Fact_fecha'])
+        df_filtrado_mes = df_completo[df_completo['AnioMes'] == anio_mes].copy()
 
         session['df_encontrado'] = df_filtrado_mes
         total_mes = len(df_filtrado_mes)
@@ -305,10 +302,11 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "volver_a_meses" or data == "descargar_todo_excel":
-        # Recargar la búsqueda original para mostrar el menú de meses de nuevo
         session = user_sessions.get(user_id, {})
+        df_orig = session.get('df_original_completo')
+        query_texto = session.get('query_texto', '')
+
         if data == "descargar_todo_excel":
-            df_orig = session.get('df_original_completo')
             if df_orig is not None and not df_orig.empty:
                 await query.delete_message()
                 buffer_excel = io.BytesIO()
@@ -322,19 +320,9 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             return
 
-        # Si vuelve a meses, reconstruimos la vista de selección de mes
-        df_orig = session.get('df_original_completo')
         if df_orig is not None:
             session['df_encontrado'] = df_orig
-            query_texto = session.get('query_texto', '')
-            
-            def extraer_anio_mes(val):
-                val_str = str(val)
-                if len(val_str) >= 7:
-                    return val_str[:7]
-                return "Sin Fecha"
-
-            df_orig['AnioMes'] = df_orig['Vtas_Fact_fecha'].apply(extraer_anio_mes)
+            df_orig['AnioMes'] = obtener_anio_mes_serie(df_orig['Vtas_Fact_fecha'])
             meses_disponibles = sorted(df_orig['AnioMes'].unique(), reverse=True)
 
             keyboard = []
@@ -355,7 +343,7 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_proceso")])
 
             await query.edit_message_text(
-                f"⚠️ **{query_texto}** tiene muchos registros. Seleccioná el mes que querés consultar:",
+                f"⚠️ **{query_texto}** tiene {len(df_orig)} registros. Seleccioná el mes que querés consultar:",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown"
             )
@@ -567,15 +555,9 @@ async def realizar_busqueda_optimizada(update_or_query, context, tipo_filtro, qu
 
     total_resultados = len(resultados)
 
-    # Si supera los 25 resultados, ofrecemos agrupar por Mes automáticamente
+    # Si supera los 25 resultados, agrupamos por Año-Mes usando Vtas_Fact_fecha
     if total_resultados > 25 and 'Vtas_Fact_fecha' in resultados.columns:
-        def extraer_anio_mes(val):
-            val_str = str(val)
-            if len(val_str) >= 7:
-                return val_str[:7]
-            return "Sin Fecha"
-
-        resultados['AnioMes'] = resultados['Vtas_Fact_fecha'].apply(extraer_anio_mes)
+        resultados['AnioMes'] = obtener_anio_mes_serie(resultados['Vtas_Fact_fecha'])
         meses_disponibles = sorted(resultados['AnioMes'].unique(), reverse=True)
 
         keyboard = []
@@ -595,7 +577,7 @@ async def realizar_busqueda_optimizada(update_or_query, context, tipo_filtro, qu
         keyboard.append([InlineKeyboardButton(f"📥 Descargar Excel Completo ({total_resultados} reg.)", callback_data="descargar_todo_excel")])
         keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_proceso")])
 
-        texto_resp = f"⚠️ **{query_texto}** tiene {total_resultados} registros en total.\n\nPara no saturar la pantalla, seleccioná el **mes y año** que querés consultar:"
+        texto_resp = f"⚠️ **{query_texto}** tiene {total_resultados} registros en total.\n\nSeleccioná el mes que querés consultar:"
         if hasattr(update_or_query, 'message') and update_or_query.message:
             await update_or_query.message.reply_text(texto_resp, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         else:
