@@ -225,7 +225,6 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             unicos = df[columna_objetivo].dropna().astype(str).unique()
             unicos = [u for u in unicos if u.strip() and u.lower() != 'nan'][:30]
             
-            # Guardamos la lista en la sesión para recuperarla por índice seguro sin problemas de longitud
             user_sessions[user_id]['lista_opciones'] = unicos
             
             for idx, item in enumerate(unicos):
@@ -308,11 +307,11 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         campos_disponibles = [col for col in campos_brutos if col not in columnas_excluidas]
         session['campos_disponibles'] = campos_disponibles
         session['paso'] = 'columnas'
-        session['columnas_seleccionadas'] = campos_disponibles.copy()
+        session['columnas_seleccionadas'] = []  # <--- CORREGIDO: Las columnas arrancan desmarcadas
         
         keyboard = []
         for campo in campos_disponibles:
-            keyboard.append([InlineKeyboardButton(f"✅ {campo}", callback_data=f"sel_col_{campo}")])
+            keyboard.append([InlineKeyboardButton(f"🔲 {campo}", callback_data=f"sel_col_{campo}")])
         keyboard.append([InlineKeyboardButton("🚀 Generar Reporte", callback_data="conf_columnas")])
         keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_proceso")])
         
@@ -323,7 +322,7 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await context.bot.send_message(
             chat_id=query.message.chat_id,
-            text="✅ Columnas cargadas. Podés tocar alguna para quitarla o darle directamente a generar:",
+            text="✅ Seleccioná las columnas que querés incluir en el reporte:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
@@ -452,14 +451,14 @@ async def realizar_busqueda_optimizada(update_or_query, context, tipo_filtro, qu
     user_sessions[user_id].update({
         'df_encontrado': resultados,
         'query_texto': query_texto,
-        'filas_seleccionadas': list(resultados.index)[:15],
+        'filas_seleccionadas': [],  # Inicia vacío
         'columnas_seleccionadas': [],
         'paso': 'filas'
     })
 
     keyboard = []
     for index, row in resultados.iterrows():
-        icon = "✅" if index in user_sessions[user_id]['filas_seleccionadas'] else "🔲"
+        icon = "🔲"  # Empiezan desmarcados
         texto_btn = construir_texto_boton(icon, row, query_texto)
         keyboard.append([InlineKeyboardButton(texto_btn, callback_data=f"sel_row_{index}")])
     
